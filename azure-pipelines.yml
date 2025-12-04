@@ -1,0 +1,144 @@
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.11'
+  azureServiceConnection: 'AzureServiceConnection'  # Update with your service connection name
+  webAppName: 'your-webapp-name'  # Update with your Azure Web App name
+  artifactoryUrl: 'https://your-company.jfrog.io/artifactory'  # Update with your JFrog URL
+  artifactoryPypiRepo: 'pypi-virtual'  # Update with your PyPI repository name (virtual or remote)
+  artifactoryUser: 'your-jfrog-username'  # Update with your JFrog username or use secret variable
+  artifactName: 'python-app'
+
+stages:
+- stage: Build
+  displayName: 'Build and Package'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Python Application'
+    steps:
+    
+    - task: UsePythonVersion@0
+      displayName: 'Use Python $(pythonVersion)'
+      inputs:
+        versionSpec: '$(pythonVersion)'
+        addToPath: true
+    
+    # Configure pip to use JFrog Artifactory
+    - script: |
+        python -m pip install --upgrade pip
+      displayName: 'Upgrade pip'
+    
+    # Install packages from JFrog Artifactory PyPI repository
+    - script: |
+        pip install --index-url https://$(artifactoryUser):$(JFROG_API_KEY)@$(echo $(artifactoryUrl) | sed 's|https://||')/api/pypi/$(artifactoryPypiRepo)/simple \
+                    --trusted-host $(echo $(artifactoryUrl) | sed 's|https://||' | cut -d'/' -f1) \
+                    --target=$(System.DefaultWorkingDirectory)/.python_packages/lib/site-packages \
+                    -r requirements.txt
+      displayName: 'Install dependencies from JFrog Artifactory'
+      env:
+        JFROG_API_KEY: $(JFROG_API_KEY)
+    
+    - script: |
+        python -m py_compile app.py calculator.py api.py
+      displayName: 'Compile Python files'
+    
+    # Create antenv script for Azure App Service
+    - script: |
+        echo '#!/bin/bash' > antenv
+        echo 'export PYTHONPATH="${PYTHONPATH}:/home/site/wwwroot/.python_packages/lib/site-packages"' >> antenv
+        chmod +x antenv
+      displayName: 'Create antenv script for Python path'
+    
+    # Verify files before archiving
+    - script: | 
+        echo "Listing files in working directory:"
+        ls -la $(System.DefaultWorkingDirectory)
+        echo "Checking .python_packages:"
+        ls -la $(System.DefaultWorkingDirectory)/.python_packages/lib/site-packages/ | head -20
+      displayName: 'Verify files before archiving'
+    
+    - task: ArchiveFiles@2
+      displayName: 'Archive application files'
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/$(artifactName)-$(Build.BuildId).zip'
+        replaceExistingArchive: true
+        verbose: true
+    
+    # Publish to Azure Pipeline artifacts for deployment stage
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish artifacts to Azure Pipelines'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+
+- stage: Deploy
+  displayName: 'Deploy to Azure App Service'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployWeb
+    displayName: 'Deploy Web App'
+    environment: 'production'  # Update with your environment name
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          
+          # Deploy to Azure App Service
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              appType: 'webAppLinux'
+              appName: '$(webAppName)'
+              package: '$(Pipeline.Workspace)/drop/$(artifactName)-$(Build.BuildId).zip'
+              runtimeStack: 'PYTHON|3.11'
+              startUpCommand: 'bash startup.sh'
+          
+          # Configure App Service settings for Streamlit + FastAPI
+          - task: AzureAppServiceSettings@1
+            displayName: 'Configure App Service settings'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              appName: '$(webAppName)'
+              resourceGroupName: 'rg-calculator-app'  # Update with your resource group
+              appSettings: |
+                [
+                  {
+                    "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+                    "value": "false",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "WEBSITES_PORT",
+                    "value": "8000",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "API_URL",
+                    "value": "http://localhost:8001",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "PYTHONPATH",
+                    "value": "/home/site/wwwroot/.python_packages/lib/site-packages",
+                    "slotSetting": false
+                  }
+                ]
+          
+          # Verify deployment
+          - script: |
+              echo "Deployment completed successfully!"
+              echo "Application URL: https://$(webAppName).azurewebsites.net"
+            displayName: 'Deployment Summary'

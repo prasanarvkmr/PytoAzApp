@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Calculator - Azure App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        
+        .calculator-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        label {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        input[type="number"] {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .operation-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        button {
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: white;
+        }
+        
+        .btn-add {
+            background: #10b981;
+        }
+        
+        .btn-subtract {
+            background: #f59e0b;
+        }
+        
+        .btn-multiply {
+            background: #3b82f6;
+        }
+        
+        .btn-divide {
+            background: #ef4444;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        #result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+        
+        #result.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .result-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .result-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .error {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .error .result-value {
+            color: #dc2626;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧮 Python Calculator</h1>
+        
+        <form class="calculator-form" onsubmit="return false;">
+            <div class="input-group">
+                <label for="num1">First Number</label>
+                <input type="number" id="num1" step="any" placeholder="Enter first number" required>
+            </div>
+            
+            <div class="input-group">
+                <label for="num2">Second Number</label>
+                <input type="number" id="num2" step="any" placeholder="Enter second number" required>
+            </div>
+            
+            <div class="operation-buttons">
+                <button type="button" class="btn-add" onclick="calculate('add')">➕ Add</button>
+                <button type="button" class="btn-subtract" onclick="calculate('subtract')">➖ Subtract</button>
+                <button type="button" class="btn-multiply" onclick="calculate('multiply')">✖️ Multiply</button>
+                <button type="button" class="btn-divide" onclick="calculate('divide')">➗ Divide</button>
+            </div>
+        </form>
+        
+        <div id="result">
+            <div class="result-label">Result</div>
+            <div class="result-value" id="result-value"></div>
+        </div>
+    </div>
+
+    <script>
+        async function calculate(operation) {
+            const num1 = document.getElementById('num1').value;
+            const num2 = document.getElementById('num2').value;
+            const resultDiv = document.getElementById('result');
+            const resultValue = document.getElementById('result-value');
+            
+            if (!num1 || !num2) {
+                showError('Please enter both numbers');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/calculate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        operation: operation,
+                        num1: parseFloat(num1),
+                        num2: parseFloat(num2)
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.classList.remove('error');
+                    resultValue.textContent = data.result;
+                } else {
+                    showError(data.error || 'An error occurred');
+                }
+                
+                resultDiv.classList.add('show');
+                
+            } catch (error) {
+                showError('Failed to connect to server');
+            }
+        }
+        
+        function showError(message) {
+            const resultDiv = document.getElementById('result');
+            const resultValue = document.getElementById('result-value');
+            
+            resultDiv.classList.add('error');
+            resultDiv.classList.add('show');
+            resultValue.textContent = message;
+        }
+    </script>
+</body>
+</html>
